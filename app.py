@@ -5,8 +5,26 @@ app = Flask(__name__)
 
 DB = "reaction.db"
 
-# 你的 AO3 作品地址
-RETURN_URL = "https://archiveofourown.org/works/88826811"
+# 改成你的 AO3 作品地址，不要加 #page1
+RETURN_URL = "https://archiveofourown.org/works/90597281"
+
+# 三个选项
+# option1 / option2 / option3 是服务器内部使用的名字
+# page1 / page2 / page3 是点击后跳转的页面
+REACTIONS = {
+    "option1": {
+        "icon": "❤️",
+        "page": "page1"
+    },
+    "option2": {
+        "icon": "❤️",
+        "page": "page2"
+    },
+    "option3": {
+        "icon": "❤️",
+        "page": "page3"
+    }
+}
 
 
 def init_db():
@@ -15,15 +33,16 @@ def init_db():
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS reactions (
-        id INTEGER PRIMARY KEY,
+        reaction TEXT PRIMARY KEY,
         count INTEGER
     )
     """)
 
-    cursor.execute("""
-    INSERT OR IGNORE INTO reactions (id, count)
-    VALUES (1, 0)
-    """)
+    for reaction in REACTIONS:
+        cursor.execute("""
+        INSERT OR IGNORE INTO reactions (reaction, count)
+        VALUES (?, 0)
+        """, (reaction,))
 
     conn.commit()
     conn.close()
@@ -35,8 +54,11 @@ def home():
 
 
 # 点击 reaction
-@app.route("/vote")
-def vote():
+@app.route("/vote/<reaction>")
+def vote(reaction):
+
+    if reaction not in REACTIONS:
+        return "Unknown reaction", 404
 
     conn = sqlite3.connect(DB)
     cursor = conn.cursor()
@@ -44,30 +66,40 @@ def vote():
     cursor.execute("""
     UPDATE reactions
     SET count = count + 1
-    WHERE id = 1
-    """)
+    WHERE reaction = ?
+    """, (reaction,))
 
     conn.commit()
     conn.close()
 
-    return redirect(RETURN_URL)
+    page = REACTIONS[reaction]["page"]
+
+    return redirect(RETURN_URL + "#" + page)
 
 
-# 生成图片
-@app.route("/count.svg")
-def count_svg():
+# 生成 SVG 图片
+@app.route("/count/<reaction>.svg")
+def count_svg(reaction):
+
+    if reaction not in REACTIONS:
+        return "Unknown reaction", 404
 
     conn = sqlite3.connect(DB)
     cursor = conn.cursor()
 
     cursor.execute("""
-    SELECT count FROM reactions WHERE id=1
-    """)
+    SELECT count
+    FROM reactions
+    WHERE reaction = ?
+    """, (reaction,))
 
-    count = cursor.fetchone()[0]
+    result = cursor.fetchone()
+
+    count = result[0] if result else 0
 
     conn.close()
 
+    icon = REACTIONS[reaction]["icon"]
 
     svg = f"""
     <svg xmlns="http://www.w3.org/2000/svg"
@@ -80,16 +112,21 @@ def count_svg():
               fill="#f5f5f5"/>
 
         <text x="15"
-              y="26"
+              y="27"
+              font-family="Arial"
               font-size="18"
               fill="#8A6CCF">
-            ❤️ {count}
+            {icon} {count}
         </text>
 
     </svg>
     """
 
-    return Response(svg, mimetype="image/svg+xml")
+    return Response(
+        svg,
+        mimetype="image/svg+xml",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
 
 
 if __name__ == "__main__":
